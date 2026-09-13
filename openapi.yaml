@@ -1,1 +1,463 @@
-# Placeholder
+openapi: 3.1.0
+info:
+  title: GitHub Issues Gateway Service
+  description: >
+    A small HTTP service that wraps the GitHub REST API for Issues on a single
+    configured repository. Exposes CRUD-style endpoints for issues and
+    comments, and receives/validates GitHub webhooks for `issues` and
+    `issue_comment` events.
+  version: "1.0.0"
+servers:
+  - url: http://localhost:{port}
+    variables:
+      port:
+        default: "8000"
+
+tags:
+  - name: Issues
+  - name: Comments
+  - name: Webhooks
+  - name: Events
+  - name: Health
+
+paths:
+  /healthz:
+    get:
+      tags: [Health]
+      summary: Health check
+      operationId: getHealth
+      responses:
+        "200":
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+
+  /issues:
+    get:
+      tags: [Issues]
+      summary: List issues in the configured repository
+      operationId: listIssues
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: state
+          in: query
+          schema:
+            type: string
+            enum: [open, closed, all]
+            default: open
+        - name: labels
+          in: query
+          description: Comma-separated list of label names to filter by
+          schema:
+            type: string
+        - name: page
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: per_page
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 30
+      responses:
+        "200":
+          description: A page of issues
+          headers:
+            Link:
+              description: RFC 5988 pagination links forwarded from GitHub
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Issue"
+              example:
+                - number: 42
+                  title: "Bug: login fails on Safari"
+                  state: open
+                  labels: ["bug"]
+                  body: "Steps to reproduce..."
+                  html_url: "https://github.com/owner/repo/issues/42"
+                  created_at: "2026-09-01T12:00:00Z"
+                  updated_at: "2026-09-01T12:00:00Z"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "503":
+          $ref: "#/components/responses/RateLimited"
+
+    post:
+      tags: [Issues]
+      summary: Create a new issue
+      operationId: createIssue
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/IssueCreate"
+            example:
+              title: "Bug: login fails on Safari"
+              body: "Steps to reproduce..."
+              labels: ["bug"]
+      responses:
+        "201":
+          description: Issue created
+          headers:
+            Location:
+              description: Path to the newly created issue, e.g. /issues/42
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Issue"
+              example:
+                number: 42
+                title: "Bug: login fails on Safari"
+                state: open
+                labels: ["bug"]
+                body: "Steps to reproduce..."
+                html_url: "https://github.com/owner/repo/issues/42"
+                created_at: "2026-09-01T12:00:00Z"
+                updated_at: "2026-09-01T12:00:00Z"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /issues/{number}:
+    parameters:
+      - name: number
+        in: path
+        required: true
+        schema:
+          type: integer
+    get:
+      tags: [Issues]
+      summary: Get a single issue
+      operationId: getIssue
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: The requested issue
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Issue"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+    patch:
+      tags: [Issues]
+      summary: Update an issue (rename, edit body, or close/open)
+      operationId: updateIssue
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/IssueUpdate"
+            example:
+              state: closed
+      responses:
+        "200":
+          description: Updated issue
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Issue"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /issues/{number}/comments:
+    parameters:
+      - name: number
+        in: path
+        required: true
+        schema:
+          type: integer
+    post:
+      tags: [Comments]
+      summary: Add a comment to an issue
+      operationId: createComment
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [body]
+              properties:
+                body:
+                  type: string
+            example:
+              body: "Thanks for the report, investigating now."
+      responses:
+        "201":
+          description: Comment created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Comment"
+              example:
+                id: 987654
+                body: "Thanks for the report, investigating now."
+                user: "octocat"
+                created_at: "2026-09-01T12:05:00Z"
+                html_url: "https://github.com/owner/repo/issues/42#issuecomment-987654"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /webhook:
+    post:
+      tags: [Webhooks]
+      summary: Receive and validate a GitHub webhook delivery
+      operationId: receiveWebhook
+      description: >
+        Verifies the `X-Hub-Signature-256` header using HMAC SHA-256 against
+        WEBHOOK_SECRET, then stores a summary of the event for later
+        inspection via GET /events. Always returns quickly; no long-running
+        work is done inline.
+      parameters:
+        - name: X-Hub-Signature-256
+          in: header
+          required: true
+          schema:
+            type: string
+          description: "sha256=<hex hmac> of the raw request body"
+        - name: X-GitHub-Event
+          in: header
+          required: true
+          schema:
+            type: string
+            enum: [issues, issue_comment, ping]
+        - name: X-GitHub-Delivery
+          in: header
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: Raw GitHub webhook payload for issues/issue_comment/ping
+      responses:
+        "204":
+          description: Event accepted and processed (or already seen — idempotent)
+        "400":
+          description: Unknown event type or unsupported action
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                error: "unsupported_event"
+                message: "Event type 'star' is not handled"
+        "401":
+          description: Invalid or missing HMAC signature
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                error: "invalid_signature"
+                message: "Signature verification failed"
+
+  /events:
+    get:
+      tags: [Events]
+      summary: List recently processed webhook deliveries (debugging aid)
+      operationId: listEvents
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 20
+      responses:
+        "200":
+          description: Recent webhook deliveries
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/EventRecord"
+              example:
+                - id: "a1b2c3d4-0000-0000-0000-000000000000"
+                  event: issues
+                  action: opened
+                  issue_number: 42
+                  timestamp: "2026-09-01T12:00:01Z"
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: >
+        Server-side bearer token used by this service to authenticate to the
+        GitHub REST API on the caller's behalf. Configured via the
+        GITHUB_TOKEN environment variable; not required from external
+        clients of this service.
+
+  responses:
+    BadRequest:
+      description: Invalid request payload
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            error: "validation_error"
+            message: "title is required"
+    Unauthorized:
+      description: Missing or invalid GitHub credentials
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            error: "unauthorized"
+            message: "GitHub token missing or invalid"
+    NotFound:
+      description: Issue not found
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            error: "not_found"
+            message: "Issue #42 does not exist"
+    RateLimited:
+      description: GitHub rate limit exceeded
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            error: "rate_limited"
+            message: "GitHub API rate limit exceeded, retry after 30s"
+
+  schemas:
+    Issue:
+      type: object
+      properties:
+        number:
+          type: integer
+        title:
+          type: string
+        body:
+          type: string
+        state:
+          type: string
+          enum: [open, closed]
+        labels:
+          type: array
+          items:
+            type: string
+        html_url:
+          type: string
+          format: uri
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+      required: [number, title, state]
+
+    IssueCreate:
+      type: object
+      required: [title]
+      properties:
+        title:
+          type: string
+        body:
+          type: string
+        labels:
+          type: array
+          items:
+            type: string
+
+    IssueUpdate:
+      type: object
+      properties:
+        title:
+          type: string
+        body:
+          type: string
+        state:
+          type: string
+          enum: [open, closed]
+
+    Comment:
+      type: object
+      properties:
+        id:
+          type: integer
+        body:
+          type: string
+        user:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        html_url:
+          type: string
+          format: uri
+      required: [id, body]
+
+    EventRecord:
+      type: object
+      properties:
+        id:
+          type: string
+          description: GitHub delivery id, used as the dedupe key
+        event:
+          type: string
+        action:
+          type: string
+        issue_number:
+          type: integer
+        timestamp:
+          type: string
+          format: date-time
+
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+        message:
+          type: string
+      required: [error, message]
