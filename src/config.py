@@ -1,4 +1,4 @@
-# Author: Jack Kibort
+# Author: Jack Kibort and Arthi Chandra Sekar
 """
 Central place for reading required configuration from environment
 variables. Fails fast and loudly if something required is missing, rather
