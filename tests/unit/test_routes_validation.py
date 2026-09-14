@@ -1,4 +1,4 @@
-# Author: Jack Kibort
+# Author: Sabari Iyyapan Duraipandian
 """
 Route validation tests. These don't hit real GitHub — they only check that
 bad input is rejected with 400 before we'd ever call out to the GitHub
