@@ -1,4 +1,4 @@
-# Author: Jack Kibort
+# Author: Arthi Chandra Sekar
 import os
 import sys
 import time
