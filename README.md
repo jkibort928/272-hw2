@@ -2,6 +2,8 @@
 
 # GitHub Issues Gateway Service
 
+![CI](https://github.com/jkibort928/272-hw2/actions/workflows/ci.yml/badge.svg)
+
 This is a small service that sits in front of the GitHub REST API and
 exposes a simpler set of endpoints for managing Issues on one repo. It
 also listens for GitHub webhooks (issues + issue comments), validates
@@ -26,6 +28,24 @@ Check that it's actually up:
 curl http://localhost:8000/healthz
 ```
 You should get back `{"status": "ok"}`.
+
+### With Docker Compose (app + Caddy reverse proxy)
+
+```bash
+docker compose up --build
+```
+
+This brings up two containers: the app itself (reachable only inside the
+compose network) and a Caddy reverse proxy in front of it, published on
+the host at port **8080** (not 8000, so it doesn't collide with the plain
+`docker run` flow above). It reads env vars straight from `.env.example`,
+so no extra setup is needed to try it.
+
+```bash
+curl http://localhost:8080/healthz
+```
+
+Tear it down with `docker compose down -v`.
 
 ### Without Docker
 
@@ -61,9 +81,11 @@ uvicorn src.main:app --reload --port 8000
 | `PORT` | no, defaults to 8000 | port the app listens on |
 
 The token only has Issues permission on one repo — didn't want to give it
-more access than it actually needs in case it ever leaked. `.env` never
-gets committed (it's in `.gitignore`), only `.env.example` with the
-placeholder names is checked in.
+more access than it actually needs in case it ever leaked. `.env.example`
+in this repo has working values for the throwaway test repo used for
+grading, so it can be used as-is (Docker Compose reads it directly). If
+you point this at your own repo, copy it to `.env` and swap in your own
+token/repo instead.
 
 ## Trying out the API
 
@@ -104,6 +126,19 @@ See recent webhook deliveries the service has recorded:
 curl http://localhost:8000/events
 ```
 
+### Conditional GET / ETag
+
+`GET /issues` and `GET /issues/{number}` both forward an ETag from GitHub.
+Send it back as `If-None-Match` on the next request and you'll get a `304`
+with an empty body instead of a full re-fetch — this saves a GitHub
+rate-limit hit:
+
+```bash
+ETAG=$(curl -sI http://localhost:8000/issues/42 | grep -i '^etag:' | cut -d' ' -f2 | tr -d '\r')
+curl -i -H "If-None-Match: $ETAG" http://localhost:8000/issues/42
+# -> HTTP/1.1 304 Not Modified
+```
+
 ## Setting up webhooks
 
 Since GitHub needs a public URL to send webhooks to, you'll need a
@@ -139,7 +174,7 @@ public URL while the tunnel's running.
 ## Tests
 
 ```bash
-pip install -r requirements.txt
+pip install -r requirements-dev.txt
 pytest tests/unit -v
 ```
 
@@ -151,6 +186,12 @@ pytest tests/unit --cov=src --cov-report=term-missing
 Integration tests live in `tests/integration` and actually hit the real
 GitHub API against your test repo, so you'll need a valid token set up
 before running those.
+
+`requirements-dev.txt` adds ruff (lint), PyYAML and openapi-spec-validator
+(OpenAPI spec validation) on top of the runtime requirements — this is
+what the CI pipeline (`.github/workflows/ci.yml`) installs and runs on
+every push/PR: lint, OpenAPI validation, unit tests with a coverage gate,
+and a Docker build + healthz smoke test.
 
 ## Layout
 
@@ -164,9 +205,13 @@ src/
 tests/
   unit/
   integration/
+.github/workflows/ci.yml   - lint, tests+coverage, OpenAPI validation, Docker build
+.devcontainer/devcontainer.json
 openapi.yaml
 design-note.docx
 requirements.txt
+requirements-dev.txt
 dockerfile
-docker-compose.yaml   (optional, not required for grading)
+docker-compose.yaml   - app + Caddy reverse proxy
+Caddyfile
 ```
