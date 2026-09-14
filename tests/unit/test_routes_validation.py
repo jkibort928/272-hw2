@@ -28,7 +28,7 @@ def test_create_issue_missing_title_returns_400():
 
 
 def test_update_issue_invalid_state_returns_400():
-    with patch("src.main.github_client.update_issue") as mock_update:
+    with patch("src.main.github_client.update_issue"):
         response = client.patch("/issues/1", json={"state": "not-a-real-state"})
     assert response.status_code == 400
     assert response.json()["detail"]["error"] == "validation_error"

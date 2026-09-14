@@ -1,0 +1,31 @@
+# Author: Sabari Iyyapan Duraipandian
+# Single config hub for pytest, coverage, and ruff.
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[tool.coverage.run]
+source = ["src"]
+branch = true
+omit = ["tests/*"]
+
+[tool.coverage.report]
+show_missing = true
+fail_under = 55
+exclude_lines = [
+    "pragma: no cover",
+    "if __name__ == .__main__.:",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+exclude = [".venv", "__pycache__"]
+
+[tool.ruff.lint]
+# I (import-sort) is intentionally excluded: several test files rely on
+# sys.path.insert()/os.environ.setdefault() running before later imports
+# (src.main reads env vars at import time), and an import-sort autofix
+# would reorder those and break the tests.
+select = ["E4", "E7", "E9", "F"]

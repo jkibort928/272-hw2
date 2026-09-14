@@ -1,0 +1,6 @@
+# Author: Sabari Iyyapan Duraipandian
+# Dev/CI-only tooling on top of the runtime requirements.
+-r requirements.txt
+ruff==0.6.9
+PyYAML==6.0.2
+openapi-spec-validator==0.7.1
