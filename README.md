@@ -1,3 +1,5 @@
+# Samhitha Banda
+
 # GitHub Issues Gateway Service
 
 This is a small service that sits in front of the GitHub REST API and
