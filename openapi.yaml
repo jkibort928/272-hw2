@@ -70,12 +70,25 @@ paths:
             minimum: 1
             maximum: 100
             default: 30
+        - name: If-None-Match
+          in: header
+          description: >
+            ETag value from a previous response to this endpoint. If it
+            matches the repo's current ETag, the server returns 304 without
+            re-fetching or re-serializing the issue list, saving a GitHub
+            rate-limit hit.
+          schema:
+            type: string
       responses:
         "200":
           description: A page of issues
           headers:
             Link:
               description: RFC 5988 pagination links forwarded from GitHub
+              schema:
+                type: string
+            ETag:
+              description: Opaque cache validator forwarded from GitHub
               schema:
                 type: string
           content:
@@ -93,6 +106,10 @@ paths:
                   html_url: "https://github.com/owner/repo/issues/42"
                   created_at: "2026-09-01T12:00:00Z"
                   updated_at: "2026-09-01T12:00:00Z"
+        "304":
+          description: >
+            Not modified. Returned when the If-None-Match header matches
+            the repo's current ETag; the response body is empty.
         "401":
           $ref: "#/components/responses/Unauthorized"
         "503":
@@ -461,3 +478,4 @@ components:
         message:
           type: string
       required: [error, message]
+
