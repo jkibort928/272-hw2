@@ -1,4 +1,4 @@
-# Author: Jack Kibort
+# Author: Arthi Chandra Sekar
 """
 Thin wrapper around the GitHub REST API for Issues on a single repo.
 """
