@@ -1,12 +1,6 @@
 # Author: Jack Kibort
 """
 Thin wrapper around the GitHub REST API for Issues on a single repo.
-
-Responsibilities kept in this module (and unit-tested in isolation):
-  - Building requests with the correct Accept header / auth.
-  - Parsing the Link header for pagination.
-  - Mapping GitHub error responses into our own AppError shape.
-  - Detecting rate-limit exhaustion and raising a typed error for it.
 """
 from __future__ import annotations
 
@@ -21,8 +15,6 @@ ACCEPT_HEADER = "application/vnd.github+json"
 
 
 class GitHubError(Exception):
-    """Base class for errors coming back from the GitHub API."""
-
     def __init__(self, status_code: int, error: str, message: str):
         self.status_code = status_code
         self.error = error
@@ -56,8 +48,6 @@ class RateLimitedError(GitHubError):
 
 @dataclass
 class PageInfo:
-    """Parsed pagination info from a GitHub Link header."""
-
     next: Optional[int] = None
     prev: Optional[int] = None
     first: Optional[int] = None
@@ -69,17 +59,9 @@ _PAGE_PARAM_RE = re.compile(r"[?&]page=(\d+)")
 
 
 def parse_link_header(link_header: Optional[str]) -> PageInfo:
-    """
-    Parse a GitHub-style `Link` header into a PageInfo object.
-
-    Example header:
-      <https://api.github.com/...&page=2>; rel="next",
-      <https://api.github.com/...&page=5>; rel="last"
-    """
     info = PageInfo()
     if not link_header:
         return info
-
     for url, rel in _LINK_ENTRY_RE.findall(link_header):
         page_match = _PAGE_PARAM_RE.search(url)
         if not page_match:
@@ -97,7 +79,6 @@ def parse_link_header(link_header: Optional[str]) -> PageInfo:
 
 
 def map_github_error(response: httpx.Response) -> GitHubError:
-    """Translate a GitHub error response into one of our typed errors."""
     status = response.status_code
     try:
         body = response.json()
@@ -119,11 +100,6 @@ def map_github_error(response: httpx.Response) -> GitHubError:
 
 
 class GitHubClient:
-    """
-    Wraps httpx calls to the GitHub REST API for a single owner/repo,
-    scoped to Issues + Comments.
-    """
-
     def __init__(self, token: str, owner: str, repo: str, base_url: str = GITHUB_API_BASE):
         self._owner = owner
         self._repo = repo
@@ -160,15 +136,29 @@ class GitHubClient:
         return response.json()
 
     def list_issues(self, state: str = "open", labels: Optional[str] = None,
-                     page: int = 1, per_page: int = 30) -> tuple[list[dict[str, Any]], PageInfo]:
+                     page: int = 1, per_page: int = 30,
+                     if_none_match: Optional[str] = None
+                     ) -> tuple[Optional[list[dict[str, Any]]], PageInfo, Optional[str], bool]:
+        """
+        Returns (issues_or_None, page_info, etag, not_modified).
+        """
         params: dict[str, Any] = {"state": state, "page": page, "per_page": per_page}
         if labels:
             params["labels"] = labels
 
-        response = self._client.get(self._repo_path("/issues"), params=params)
+        headers = {}
+        if if_none_match:
+            headers["If-None-Match"] = if_none_match
+
+        response = self._client.get(self._repo_path("/issues"), params=params, headers=headers)
+
+        if response.status_code == 304:
+            return None, PageInfo(), response.headers.get("ETag"), True
+
         self._check_and_raise(response)
         page_info = parse_link_header(response.headers.get("Link"))
-        return response.json(), page_info
+        etag = response.headers.get("ETag")
+        return response.json(), page_info, etag, False
 
     def get_issue(self, number: int) -> dict[str, Any]:
         response = self._client.get(self._repo_path(f"/issues/{number}"))

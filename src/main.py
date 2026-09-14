@@ -1,12 +1,6 @@
 # Author: Jack Kibort
 """
-FastAPI app implementing the routes described in openapi.yaml:
-  GET/POST   /issues
-  GET/PATCH  /issues/{number}
-  POST       /issues/{number}/comments
-  POST       /webhook
-  GET        /events
-  GET        /healthz
+FastAPI app implementing the routes described in openapi.yaml.
 """
 from __future__ import annotations
 
@@ -31,8 +25,6 @@ github_client = GitHubClient(
 event_store = EventStore()
 
 
-# ---------------------------------------------------------------- schemas --
-
 class IssueCreate(BaseModel):
     title: str = Field(min_length=1)
     body: Optional[str] = None
@@ -42,7 +34,7 @@ class IssueCreate(BaseModel):
 class IssueUpdate(BaseModel):
     title: Optional[str] = None
     body: Optional[str] = None
-    state: Optional[str] = None  # "open" | "closed"
+    state: Optional[str] = None
 
 
 class CommentCreate(BaseModel):
@@ -57,8 +49,6 @@ def github_error_to_http(exc: GitHubError) -> HTTPException:
     return HTTPException(status_code=exc.status_code,
                           detail=error_body(exc.error, exc.message))
 
-
-# ------------------------------------------------------------------ routes --
 
 @app.get("/healthz")
 def healthz():
@@ -80,7 +70,8 @@ def create_issue(payload: IssueCreate, response: Response):
 
 @app.get("/issues")
 def list_issues(response: Response, state: str = "open",
-                 labels: Optional[str] = None, page: int = 1, per_page: int = 30):
+                 labels: Optional[str] = None, page: int = 1, per_page: int = 30,
+                 if_none_match: Optional[str] = Header(default=None, alias="If-None-Match")):
     if state not in ("open", "closed", "all"):
         raise HTTPException(400, detail=error_body(
             "validation_error", "state must be one of open, closed, all"))
@@ -89,11 +80,18 @@ def list_issues(response: Response, state: str = "open",
             "validation_error", "per_page must be <= 100"))
 
     try:
-        issues, page_info = github_client.list_issues(
-            state=state, labels=labels, page=page, per_page=per_page
+        issues, page_info, etag, not_modified = github_client.list_issues(
+            state=state, labels=labels, page=page, per_page=per_page,
+            if_none_match=if_none_match,
         )
     except GitHubError as exc:
         raise github_error_to_http(exc)
+
+    if etag:
+        response.headers["ETag"] = etag
+
+    if not_modified:
+        return Response(status_code=304, headers=dict(response.headers))
 
     link_parts = []
     if page_info.next:
@@ -173,7 +171,6 @@ async def receive_webhook(
     issue_number = (payload.get("issue") or {}).get("number")
     delivery_id = x_github_delivery or "unknown"
 
-    # Idempotent: a redelivery of the same (delivery_id, action) is a no-op.
     if not event_store.already_processed(delivery_id, action):
         event_store.record(delivery_id, x_github_event, action, issue_number)
 
@@ -194,8 +191,6 @@ def list_events(limit: int = 20):
         for r in records
     ]
 
-
-# --------------------------------------------------------------- helpers --
 
 def _serialize_issue(issue: dict) -> dict:
     return {
