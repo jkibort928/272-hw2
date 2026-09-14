@@ -1,0 +1,30 @@
+// Author: Sabari Iyyapan Duraipandian
+{
+  "name": "272-hw2 GitHub Issues Gateway",
+  "image": "mcr.microsoft.com/devcontainers/python:1-3.12-bookworm",
+  "features": {
+    "ghcr.io/devcontainers/features/docker-in-docker:2": {},
+    "ghcr.io/devcontainers/features/github-cli:1": {}
+  },
+  "postCreateCommand": "pip install --user -r requirements-dev.txt",
+  "runArgs": ["--env-file", ".env.example"],
+  "forwardPorts": [8000, 8080],
+  "portsAttributes": {
+    "8000": { "label": "gateway (direct)" },
+    "8080": { "label": "caddy proxy" }
+  },
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-python.python",
+        "charliermarsh.ruff",
+        "redhat.vscode-yaml",
+        "ms-azuretools.vscode-docker"
+      ],
+      "settings": {
+        "python.testing.pytestEnabled": true,
+        "python.testing.pytestArgs": ["tests/unit"]
+      }
+    }
+  }
+}
