@@ -5,6 +5,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 import httpx
 from src.github_client import (
+    GitHubClient,
     parse_link_header,
     map_github_error,
     NotFoundError,
@@ -89,3 +90,58 @@ def test_map_429_to_rate_limited_error():
     resp = _make_response(429, {"message": "Too many requests"})
     err = map_github_error(resp)
     assert isinstance(err, RateLimitedError)
+
+
+def _client_with_transport(handler) -> GitHubClient:
+    client = GitHubClient(token="test-token", owner="o", repo="r")
+    client._client = httpx.Client(
+        base_url="https://api.github.com",
+        transport=httpx.MockTransport(handler),
+    )
+    return client
+
+
+def test_get_issue_forwards_if_none_match_and_returns_etag():
+    seen_headers = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen_headers.update(request.headers)
+        return httpx.Response(
+            200, json={"number": 7, "title": "t", "state": "open", "labels": []},
+            headers={"ETag": 'W/"abc"'},
+        )
+
+    client = _client_with_transport(handler)
+    issue, etag, not_modified = client.get_issue(7, if_none_match='W/"old"')
+
+    assert seen_headers.get("if-none-match") == 'W/"old"'
+    assert issue["number"] == 7
+    assert etag == 'W/"abc"'
+    assert not_modified is False
+
+
+def test_get_issue_maps_304_to_not_modified():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(304, headers={"ETag": 'W/"abc"'})
+
+    client = _client_with_transport(handler)
+    issue, etag, not_modified = client.get_issue(7, if_none_match='W/"abc"')
+
+    assert issue is None
+    assert etag == 'W/"abc"'
+    assert not_modified is True
+
+
+def test_get_issue_without_if_none_match_sends_no_header():
+    seen_headers = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen_headers.update(request.headers)
+        return httpx.Response(
+            200, json={"number": 1, "title": "t", "state": "open", "labels": []},
+        )
+
+    client = _client_with_transport(handler)
+    client.get_issue(1)
+
+    assert "if-none-match" not in seen_headers

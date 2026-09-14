@@ -107,11 +107,20 @@ def list_issues(response: Response, state: str = "open",
 
 
 @app.get("/issues/{number}")
-def get_issue(number: int):
+def get_issue(number: int, response: Response,
+              if_none_match: Optional[str] = Header(default=None, alias="If-None-Match")):
     try:
-        issue = github_client.get_issue(number)
+        issue, etag, not_modified = github_client.get_issue(
+            number, if_none_match=if_none_match)
     except GitHubError as exc:
         raise github_error_to_http(exc)
+
+    if etag:
+        response.headers["ETag"] = etag
+
+    if not_modified:
+        return Response(status_code=304, headers=dict(response.headers))
+
     return _serialize_issue(issue)
 
 

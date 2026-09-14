@@ -160,10 +160,24 @@ class GitHubClient:
         etag = response.headers.get("ETag")
         return response.json(), page_info, etag, False
 
-    def get_issue(self, number: int) -> dict[str, Any]:
-        response = self._client.get(self._repo_path(f"/issues/{number}"))
+    def get_issue(self, number: int, if_none_match: Optional[str] = None
+                  ) -> tuple[Optional[dict[str, Any]], Optional[str], bool]:
+        """
+        Returns (issue_or_None, etag, not_modified). Mirrors list_issues'
+        conditional-GET handling (payload, etag, not_modified ordering),
+        minus PageInfo since a single issue has no pagination.
+        """
+        headers = {}
+        if if_none_match:
+            headers["If-None-Match"] = if_none_match
+
+        response = self._client.get(self._repo_path(f"/issues/{number}"), headers=headers)
+
+        if response.status_code == 304:
+            return None, response.headers.get("ETag"), True
+
         self._check_and_raise(response)
-        return response.json()
+        return response.json(), response.headers.get("ETag"), False
 
     def update_issue(self, number: int, title: Optional[str] = None,
                       body: Optional[str] = None, state: Optional[str] = None) -> dict[str, Any]:

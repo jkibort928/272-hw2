@@ -170,13 +170,31 @@ paths:
       operationId: getIssue
       security:
         - bearerAuth: []
+      parameters:
+        - name: If-None-Match
+          in: header
+          description: >
+            ETag value from a previous response for this issue. If it still
+            matches, the server returns 304 without re-fetching from GitHub,
+            saving a rate-limit hit.
+          schema:
+            type: string
       responses:
         "200":
           description: The requested issue
+          headers:
+            ETag:
+              description: Opaque cache validator forwarded from GitHub
+              schema:
+                type: string
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Issue"
+        "304":
+          description: >
+            Not modified. Returned when If-None-Match matches the issue's
+            current ETag; the response body is empty.
         "404":
           $ref: "#/components/responses/NotFound"
 
