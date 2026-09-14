@@ -1,4 +1,4 @@
-# Author: Jack Kibort
+# Author: Jack Kibort and Arthi Chandra Sekar
 """
 FastAPI app implementing the routes described in openapi.yaml.
 """
